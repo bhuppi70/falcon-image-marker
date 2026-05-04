@@ -48,6 +48,7 @@ class HeliosOutput:
         self._lib = None
         self._dac_count = 0
         self._normalized_x: float | None = None  # 0.0-1.0, or None to blank
+        self._show_perimeter: bool = True
         self._lock = threading.Lock()
         self._running = False
         self._thread: threading.Thread | None = None
@@ -90,6 +91,10 @@ class HeliosOutput:
             self._lib = None
         self._dac_count = 0
 
+    def set_perimeter(self, enabled: bool) -> None:
+        with self._lock:
+            self._show_perimeter = enabled
+
     def set_marker(self, normalized_x: float | None) -> None:
         """Update the projected line position.
 
@@ -129,6 +134,18 @@ class HeliosOutput:
             except OSError:
                 continue
         return None
+
+    @staticmethod
+    def _build_line_frame(helios_x: int) -> tuple[ctypes.Array, int]:
+        """Vertical green line only."""
+        n = _LINE_POINTS
+        frame = (HeliosPoint * n)()
+        for i in range(n):
+            frame[i].x = helios_x
+            frame[i].y = int(i * 4095 / (n - 1))
+            frame[i].g = 255
+            frame[i].i = 255
+        return frame, n
 
     @staticmethod
     def _build_combined_frame(helios_x: int) -> tuple[ctypes.Array, int]:
@@ -178,9 +195,14 @@ class HeliosOutput:
         while self._running:
             with self._lock:
                 nx = self._normalized_x
+                show_perimeter = self._show_perimeter
 
             if nx is not None:
-                frame, n = self._build_combined_frame(int(nx * 4095))
+                helios_x = int(nx * 4095)
+                if show_perimeter:
+                    frame, n = self._build_combined_frame(helios_x)
+                else:
+                    frame, n = self._build_line_frame(helios_x)
             else:
                 frame, n = self._blank_frame()
 

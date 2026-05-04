@@ -17,6 +17,7 @@ class ImageCanvas(QWidget):
         super().__init__(parent)
         self._pixmap: QPixmap | None = None
         self._marker_image_x: float | None = None  # stored in image-pixel coords
+        self._show_perimeter: bool = True
         self.setMinimumSize(400, 300)
         self.setCursor(Qt.CursorShape.CrossCursor)
 
@@ -33,6 +34,10 @@ class ImageCanvas(QWidget):
         self.update()
         self.marker_changed.emit(None)
         return True
+
+    def set_perimeter(self, enabled: bool) -> None:
+        self._show_perimeter = enabled
+        self.update()
 
     def clear_marker(self) -> None:
         self._marker_image_x = None
@@ -72,10 +77,11 @@ class ImageCanvas(QWidget):
             painter.setPen(pen)
             painter.drawLine(widget_x, img_rect.top(), widget_x, img_rect.bottom())
 
-            border_pen = QPen(QColor(0, 255, 0), 2, Qt.PenStyle.DashLine)
-            border_pen.setDashPattern([8, 5])
-            painter.setPen(border_pen)
-            painter.drawRect(img_rect)
+            if self._show_perimeter:
+                border_pen = QPen(QColor(0, 255, 0), 2, Qt.PenStyle.DashLine)
+                border_pen.setDashPattern([8, 5])
+                painter.setPen(border_pen)
+                painter.drawRect(img_rect)
 
     def mousePressEvent(self, event):
         if self._pixmap is None:

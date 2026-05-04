@@ -40,6 +40,11 @@ _BUTTON_STYLE = """
         color: #666;
         border-color: #444;
     }
+    QPushButton:checked {
+        background-color: #1a4d1a;
+        border-color: #00cc44;
+        color: #00ff55;
+    }
 """
 
 _LASER_CONNECTED_STYLE = "color: #00cc44; font-size: 12px;"
@@ -69,6 +74,12 @@ class MainWindow(QMainWindow):
         self._btn_clear.setEnabled(False)
         self._btn_clear.clicked.connect(self._on_clear_clicked)
 
+        self._btn_perimeter = QPushButton("Perimeter")
+        self._btn_perimeter.setStyleSheet(_BUTTON_STYLE)
+        self._btn_perimeter.setCheckable(True)
+        self._btn_perimeter.setChecked(True)
+        self._btn_perimeter.toggled.connect(self._on_perimeter_toggled)
+
         if laser_ok:
             n = self._laser.device_count
             laser_text = f"Laser: Connected ({n} device{'s' if n != 1 else ''})"
@@ -85,6 +96,7 @@ class MainWindow(QMainWindow):
         btn_bar.setSpacing(10)
         btn_bar.addWidget(self._btn_open)
         btn_bar.addWidget(self._btn_clear)
+        btn_bar.addWidget(self._btn_perimeter)
         btn_bar.addStretch()
 
         # --- Canvas ---
@@ -161,6 +173,10 @@ class MainWindow(QMainWindow):
 
     def _on_clear_clicked(self):
         self._canvas.clear_marker()
+
+    def _on_perimeter_toggled(self, enabled: bool) -> None:
+        self._canvas.set_perimeter(enabled)
+        self._laser.set_perimeter(enabled)
 
     def _on_marker_changed(self, image_x: float | None):
         self._btn_clear.setEnabled(image_x is not None)
