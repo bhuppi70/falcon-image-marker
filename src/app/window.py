@@ -86,7 +86,6 @@ class MainWindow(QMainWindow):
         btn_bar.addWidget(self._btn_open)
         btn_bar.addWidget(self._btn_clear)
         btn_bar.addStretch()
-        btn_bar.addWidget(self._laser_label)
 
         # --- Canvas ---
         self._canvas = ImageCanvas()
@@ -104,6 +103,7 @@ class MainWindow(QMainWindow):
         # --- Status bar ---
         self._status = QLabel("Open an image to get started")
         self.statusBar().addWidget(self._status)
+        self.statusBar().addPermanentWidget(self._laser_label)
 
         self._build_menu()
 
