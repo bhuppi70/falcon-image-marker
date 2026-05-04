@@ -1,6 +1,6 @@
 [project]
 name = "falcon-image-marker"
-version = "0.1.0"
+version = "1.0.0"
 description = "GUI tool to display an image and mark locations with a vertical line."
 readme = "README.md"
 authors = [
