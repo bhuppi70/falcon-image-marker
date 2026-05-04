@@ -7,6 +7,10 @@ import sys
 import threading
 import time
 from ctypes import POINTER, Structure, c_int, c_uint, c_uint8, c_uint16
+from pathlib import Path
+
+# Libraries are stored in the project root (two levels above src/app/)
+_LIB_DIR = Path(__file__).parent.parent.parent
 
 # Number of points used to draw the vertical line and scan rate
 _LINE_POINTS = 300
@@ -95,11 +99,14 @@ class HeliosOutput:
 
     @staticmethod
     def _load_library():
-        candidates = {
+        names = {
             "darwin": ["libHeliosDacAPI.dylib"],
             "linux":  ["libHeliosDacAPI.so", "libHeliosDacAPI.so.1"],
             "win32":  ["HeliosDacAPI.dll"],
         }.get(sys.platform, [])
+
+        # Build candidate paths: project root first, then bare name (system path)
+        candidates = [str(_LIB_DIR / n) for n in names] + names
 
         for name in candidates:
             try:
