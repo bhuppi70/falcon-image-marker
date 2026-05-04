@@ -149,30 +149,43 @@ class HeliosOutput:
 
     @staticmethod
     def _build_combined_frame(helios_x: int) -> tuple[ctypes.Array, int]:
-        """Dashed perimeter rectangle + vertical green line at helios_x."""
+        """Dashed perimeter rectangle + vertical green line at helios_x.
+
+        Frame structure (all transitions are blanked so galvos move dark):
+          1. Perimeter — clockwise, dashed, ends at (0, 0)
+          2. Blank transition (0,0) → (helios_x, 0)
+          3. Vertical line — fully lit, ends at (helios_x, 4095)
+          4. Blank tail (helios_x, 4095) → (0, 0) — REQUIRED so the next
+             frame's perimeter start at (0, 0) is reached dark; without this
+             the galvos traverse the full diagonal with the laser on.
+        """
         pts: list[tuple[int, int, bool]] = []
 
-        # Dashed perimeter — clockwise from bottom-left
+        # 1. Dashed perimeter — clockwise from bottom-left, ends at (0, 0)
         n = _PERIM_PTS_PER_SIDE
         cycle = _DASH_ON + _DASH_OFF
         sides = [
-            [(int(i * 4095 / (n - 1)), 0)    for i in range(n)],           # bottom L→R
-            [(4095, int(i * 4095 / (n - 1))) for i in range(n)],            # right  B→T
-            [(int((n-1-i) * 4095 / (n-1)), 4095) for i in range(n)],       # top    R→L
-            [(0, int((n-1-i) * 4095 / (n-1))) for i in range(n)],           # left   T→B
+            [(int(i * 4095 / (n - 1)), 0)         for i in range(n)],  # bottom L→R
+            [(4095, int(i * 4095 / (n - 1)))       for i in range(n)],  # right  B→T
+            [(int((n-1-i) * 4095 / (n-1)), 4095)  for i in range(n)],  # top    R→L
+            [(0, int((n-1-i) * 4095 / (n-1)))     for i in range(n)],  # left   T→B
         ]
         for side in sides:
             for j, (x, y) in enumerate(side):
                 pts.append((x, y, (j % cycle) < _DASH_ON))
 
-        # Blanked transition: reposition galvos to start of vertical line
-        for _ in range(5):
+        # 2. Blank transition: (0, 0) → (helios_x, 0)
+        for _ in range(20):
             pts.append((helios_x, 0, False))
 
-        # Vertical line
+        # 3. Vertical line: (helios_x, 0) → (helios_x, 4095)
         m = _LINE_POINTS
         for i in range(m):
             pts.append((helios_x, int(i * 4095 / (m - 1)), True))
+
+        # 4. Blank tail: (helios_x, 4095) → (0, 0) so next frame starts dark
+        for _ in range(20):
+            pts.append((0, 0, False))
 
         total = len(pts)
         frame = (HeliosPoint * total)()
