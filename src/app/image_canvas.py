@@ -67,9 +67,15 @@ class ImageCanvas(QWidget):
 
         if self._marker_image_x is not None:
             widget_x = self._image_x_to_widget_x(self._marker_image_x, img_rect)
+
             pen = QPen(QColor(0, 255, 0), 3, Qt.PenStyle.SolidLine)
             painter.setPen(pen)
             painter.drawLine(widget_x, img_rect.top(), widget_x, img_rect.bottom())
+
+            border_pen = QPen(QColor(0, 255, 0), 2, Qt.PenStyle.DashLine)
+            border_pen.setDashPattern([8, 5])
+            painter.setPen(border_pen)
+            painter.drawRect(img_rect)
 
     def mousePressEvent(self, event):
         if self._pixmap is None:

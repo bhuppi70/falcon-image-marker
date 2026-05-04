@@ -12,8 +12,14 @@ from pathlib import Path
 # Libraries are stored in the project root (two levels above src/app/)
 _LIB_DIR = Path(__file__).parent.parent.parent
 
-# Number of points used to draw the vertical line and scan rate
-_LINE_POINTS = 300
+# Vertical line
+_LINE_POINTS = 200
+
+# Dashed perimeter: points per side and dash on/off lengths (in points)
+_PERIM_PTS_PER_SIDE = 120
+_DASH_ON = 15
+_DASH_OFF = 10
+
 _LINE_PPS = 30_000
 
 # WriteFrame flag: play once per call (don't loop internally)
@@ -125,18 +131,40 @@ class HeliosOutput:
         return None
 
     @staticmethod
-    def _build_line_frame(helios_x: int) -> tuple[ctypes.Array, int]:
-        """Vertical green line at helios_x, scanning y from 0 to 4095."""
-        n = _LINE_POINTS
-        frame = (HeliosPoint * n)()
-        for i in range(n):
-            frame[i].x = helios_x
-            frame[i].y = int(i * 4095 / (n - 1))
-            frame[i].r = 0
-            frame[i].g = 255
-            frame[i].b = 0
-            frame[i].i = 255
-        return frame, n
+    def _build_combined_frame(helios_x: int) -> tuple[ctypes.Array, int]:
+        """Dashed perimeter rectangle + vertical green line at helios_x."""
+        pts: list[tuple[int, int, bool]] = []
+
+        # Dashed perimeter — clockwise from bottom-left
+        n = _PERIM_PTS_PER_SIDE
+        cycle = _DASH_ON + _DASH_OFF
+        sides = [
+            [(int(i * 4095 / (n - 1)), 0)    for i in range(n)],           # bottom L→R
+            [(4095, int(i * 4095 / (n - 1))) for i in range(n)],            # right  B→T
+            [(int((n-1-i) * 4095 / (n-1)), 4095) for i in range(n)],       # top    R→L
+            [(0, int((n-1-i) * 4095 / (n-1))) for i in range(n)],           # left   T→B
+        ]
+        for side in sides:
+            for j, (x, y) in enumerate(side):
+                pts.append((x, y, (j % cycle) < _DASH_ON))
+
+        # Blanked transition: reposition galvos to start of vertical line
+        for _ in range(5):
+            pts.append((helios_x, 0, False))
+
+        # Vertical line
+        m = _LINE_POINTS
+        for i in range(m):
+            pts.append((helios_x, int(i * 4095 / (m - 1)), True))
+
+        total = len(pts)
+        frame = (HeliosPoint * total)()
+        for i, (x, y, lit) in enumerate(pts):
+            frame[i].x = x
+            frame[i].y = y
+            frame[i].g = 255 if lit else 0
+            frame[i].i = 255 if lit else 0
+        return frame, total
 
     @staticmethod
     def _blank_frame() -> tuple[ctypes.Array, int]:
@@ -152,7 +180,7 @@ class HeliosOutput:
                 nx = self._normalized_x
 
             if nx is not None:
-                frame, n = self._build_line_frame(int(nx * 4095))
+                frame, n = self._build_combined_frame(int(nx * 4095))
             else:
                 frame, n = self._blank_frame()
 
