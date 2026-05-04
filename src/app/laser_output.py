@@ -152,6 +152,9 @@ class HeliosOutput:
         """Dashed perimeter rectangle + vertical green line at helios_x.
 
         Frame structure (all transitions are blanked so galvos move dark):
+          0. Blank head-dwell at (0, 0) — combined with tail of previous frame
+             this gives galvos ~1.3 ms to settle at the corner before the
+             perimeter turns on, eliminating the lower-left corner dip.
           1. Perimeter — clockwise, dashed, ends at (0, 0)
           2. Blank transition (0,0) → (helios_x, 0)
           3. Vertical line — fully lit, ends at (helios_x, 4095)
@@ -160,6 +163,10 @@ class HeliosOutput:
           5. Blank tail (helios_x, 4095) → (0, 0) so next frame starts dark
         """
         pts: list[tuple[int, int, bool]] = []
+
+        # 0. Blank head-dwell at (0, 0) — galvo settle before perimeter starts
+        for _ in range(20):
+            pts.append((0, 0, False))
 
         # 1. Dashed perimeter — clockwise from bottom-left, ends at (0, 0)
         n = _PERIM_PTS_PER_SIDE
