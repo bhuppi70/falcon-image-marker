@@ -155,9 +155,9 @@ class HeliosOutput:
           1. Perimeter — clockwise, dashed, ends at (0, 0)
           2. Blank transition (0,0) → (helios_x, 0)
           3. Vertical line — fully lit, ends at (helios_x, 4095)
-          4. Blank tail (helios_x, 4095) → (0, 0) — REQUIRED so the next
-             frame's perimeter start at (0, 0) is reached dark; without this
-             the galvos traverse the full diagonal with the laser on.
+          4. Blank dwell at (helios_x, 4095) — laser off but galvos stationary,
+             allows laser to fully extinguish before galvos start moving
+          5. Blank tail (helios_x, 4095) → (0, 0) so next frame starts dark
         """
         pts: list[tuple[int, int, bool]] = []
 
@@ -183,7 +183,11 @@ class HeliosOutput:
         for i in range(m):
             pts.append((helios_x, int(i * 4095 / (m - 1)), True))
 
-        # 4. Blank tail: (helios_x, 4095) → (0, 0) so next frame starts dark
+        # 4. Blank dwell at top of line — laser off, galvos stationary
+        for _ in range(10):
+            pts.append((helios_x, 4095, False))
+
+        # 5. Blank tail: (helios_x, 4095) → (0, 0) so next frame starts dark
         for _ in range(20):
             pts.append((0, 0, False))
 
