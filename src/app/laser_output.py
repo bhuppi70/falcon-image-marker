@@ -296,10 +296,19 @@ class HeliosOutput:
 
         collect(root, identity)
 
-        STEP = 3.0      # SVG units between laser sample points
-        BLANK_DWELL = 8  # dark points for galvo settle at sub-path starts
+        # STEP: SVG units between laser sample points.  1.0 gives smooth bezier curves;
+        # scale relative to viewBox so both small (Bigfoot, 211 units) and large (800 units)
+        # SVGs sample at a similar physical density (~20 laser units between points).
+        STEP = max(0.5, vb_w * 20 / 4095)
+        BLANK_DWELL = 8   # dark-dwell points when galvos must jump to a new position
+        # Two endpoints are "continuous" when they map to the same laser pixel (≤ 10 units).
+        # This detects connected strokes split across separate <path> elements (e.g. Bigfoot)
+        # without accidentally bridging genuinely separate strokes.
+        CONTINUITY_THRESH = 10
 
         result: list[tuple[int, int, bool]] = []
+        last_lx: int | None = None  # laser coords of last drawn endpoint, tracked across paths
+        last_ly: int | None = None
 
         for d_str, T in path_list:
             try:
@@ -310,40 +319,59 @@ class HeliosOutput:
             if not segs:
                 continue
 
-            prev_end = None
+            prev_end_raw = None  # complex endpoint of last seg (for intra-path sub-path detection)
             for seg in segs:
                 seg_start = seg.point(0)
-                is_new = (prev_end is None) or (abs(seg_start - prev_end) > 1e-6)
-                if is_new:
-                    sx, sy = apply_T(T, seg_start.real, seg_start.imag)
-                    lx0, ly0 = to_laser(sx, sy)
+
+                # Compute this segment's start in laser space
+                sx, sy = apply_T(T, seg_start.real, seg_start.imag)
+                lx0, ly0 = to_laser(sx, sy)
+
+                # Blank-dwell only when galvos must actually jump.
+                # Three cases that constitute a genuine gap:
+                #   1. Very first point (no prior position)
+                #   2. Intra-path sub-path: M command gap in path coordinates
+                #   3. Cross-path or large position jump in laser coordinates
+                is_gap = (
+                    last_lx is None
+                    or (prev_end_raw is not None and abs(seg_start - prev_end_raw) > 1e-6)
+                    or abs(lx0 - last_lx) + abs(ly0 - last_ly) > CONTINUITY_THRESH
+                )
+                if is_gap:
                     for _ in range(BLANK_DWELL):
                         result.append((lx0, ly0, False))
 
                 seg_len = seg.length()
-                n = max(2, int(seg_len / STEP) + 1)
+                if seg_len < 0.01:  # skip degenerate/zero-length segments
+                    prev_end_raw = seg.point(1)
+                    last_lx, last_ly = lx0, ly0
+                    continue
+
+                n = max(3, int(seg_len / STEP) + 1)
                 for k in range(n):
                     p = seg.point(k / (n - 1))
                     px, py = apply_T(T, p.real, p.imag)
                     lx, ly = to_laser(px, py)
                     result.append((lx, ly, True))
 
-                prev_end = seg.point(1)
+                prev_end_raw = seg.point(1)
+                ex, ey = apply_T(T, prev_end_raw.real, prev_end_raw.imag)
+                last_lx, last_ly = to_laser(ex, ey)
 
         return result
 
     @staticmethod
     def _build_logo_frame(logo_pts: list) -> tuple[ctypes.Array, int]:
-        pts: list[tuple[int, int, bool]] = []
-        for _ in range(20):
-            pts.append((0, 0, False))
-        pts.extend(logo_pts)
+        # Tail returns to the first content position (not to 0,0) so galvos stay
+        # near the logo between frames and don't create a corner artifact.
+        pts: list[tuple[int, int, bool]] = list(logo_pts)
         if logo_pts:
-            lx, ly, _ = logo_pts[-1]
-            for _ in range(10):
-                pts.append((lx, ly, False))
-        for _ in range(20):
-            pts.append((0, 0, False))
+            lx0, ly0, _ = logo_pts[0]   # first content position
+            lx_end, ly_end, _ = logo_pts[-1]
+            for _ in range(10):          # dwell at last lit position so laser extinguishes
+                pts.append((lx_end, ly_end, False))
+            for _ in range(20):          # slew back to first position, dark
+                pts.append((lx0, ly0, False))
         total = len(pts)
         frame = (HeliosPoint * total)()
         for i, (x, y, lit) in enumerate(pts):
