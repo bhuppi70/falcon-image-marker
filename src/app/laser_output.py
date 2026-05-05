@@ -340,7 +340,18 @@ class HeliosOutput:
                 sx, sy = apply_T(T, seg_start.real, seg_start.imag)
                 lx0, ly0 = to_laser(sx, sy)
 
-                # Blank-dwell only when galvos must actually jump.
+                seg_len = seg.length()
+                if seg_len < 0.01:
+                    # Degenerate/zero-length segment: update tracking state but emit
+                    # NO points — not even a blank dwell.  This prevents isolated
+                    # zero-length artefact paths (common in CAD-exported SVGs) from
+                    # forcing unnecessary galvo jumps and leaving logo_pts[-1] at an
+                    # unrelated position that causes a long blanked slew on frame wrap.
+                    prev_end_raw = seg.point(1)
+                    last_lx, last_ly = lx0, ly0
+                    continue
+
+                # Blank-dwell only when galvos must actually jump (non-degenerate segs only).
                 # Three cases that constitute a genuine gap:
                 #   1. Very first point (no prior position)
                 #   2. Intra-path sub-path: M command gap in path coordinates
@@ -353,12 +364,6 @@ class HeliosOutput:
                 if is_gap:
                     for _ in range(BLANK_DWELL):
                         result.append((lx0, ly0, False))
-
-                seg_len = seg.length()
-                if seg_len < 0.01:  # skip degenerate/zero-length segments
-                    prev_end_raw = seg.point(1)
-                    last_lx, last_ly = lx0, ly0
-                    continue
 
                 n = max(2, int(seg_len * t_scale / STEP) + 1)
                 for k in range(n):
