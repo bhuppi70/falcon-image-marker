@@ -233,6 +233,7 @@ class HeliosOutput:
     @staticmethod
     def _svg_to_scan_points(svg_path: str) -> list:
         """Parse an SVG file and return (lx, ly, lit) tuples in 0-4095 laser space."""
+        import math
         import re
         import xml.etree.ElementTree as ET
         from svgpathtools import parse_path
@@ -326,6 +327,11 @@ class HeliosOutput:
             if not segs:
                 continue
 
+            # Effective scale: magnitude of the x-axis vector after applying T.
+            # seg.length() is in local (pre-transform) coordinates; multiply by t_scale
+            # to get SVG document-space length before comparing to STEP.
+            t_scale = math.hypot(T[0], T[1])
+
             prev_end_raw = None  # complex endpoint of last seg (for intra-path sub-path detection)
             for seg in segs:
                 seg_start = seg.point(0)
@@ -354,7 +360,7 @@ class HeliosOutput:
                     last_lx, last_ly = lx0, ly0
                     continue
 
-                n = max(3, int(seg_len / STEP) + 1)
+                n = max(2, int(seg_len * t_scale / STEP) + 1)
                 for k in range(n):
                     p = seg.point(k / (n - 1))
                     px, py = apply_T(T, p.real, p.imag)
