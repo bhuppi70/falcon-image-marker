@@ -80,6 +80,12 @@ class MainWindow(QMainWindow):
         self._btn_perimeter.setChecked(True)
         self._btn_perimeter.toggled.connect(self._on_perimeter_toggled)
 
+        self._btn_logo = QPushButton("Logo")
+        self._btn_logo.setStyleSheet(_BUTTON_STYLE)
+        self._btn_logo.setCheckable(True)
+        self._btn_logo.setChecked(False)
+        self._btn_logo.toggled.connect(self._on_logo_toggled)
+
         if laser_ok:
             n = self._laser.device_count
             laser_text = f"Laser: Connected ({n} device{'s' if n != 1 else ''})"
@@ -97,6 +103,7 @@ class MainWindow(QMainWindow):
         btn_bar.addWidget(self._btn_open)
         btn_bar.addWidget(self._btn_clear)
         btn_bar.addWidget(self._btn_perimeter)
+        btn_bar.addWidget(self._btn_logo)
         btn_bar.addStretch()
 
         # --- Canvas ---
@@ -177,6 +184,16 @@ class MainWindow(QMainWindow):
     def _on_perimeter_toggled(self, enabled: bool) -> None:
         self._canvas.set_perimeter(enabled)
         self._laser.set_perimeter(enabled)
+
+    def _on_logo_toggled(self, enabled: bool) -> None:
+        if enabled and not self._laser.logo_loaded:
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Open Logo SVG", str(Path.home()), "SVG Files (*.svg);;All Files (*)"
+            )
+            if not path or not self._laser.load_logo(path):
+                self._btn_logo.setChecked(False)
+                return
+        self._laser.set_logo_mode(enabled)
 
     def _on_marker_changed(self, image_x: float | None):
         self._btn_clear.setEnabled(image_x is not None)
