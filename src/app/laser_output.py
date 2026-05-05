@@ -284,10 +284,17 @@ class HeliosOutput:
         identity = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
         path_list: list[tuple[str, tuple]] = []
 
+        # Elements whose subtree contains definition/reference paths, not rendered geometry.
+        _SKIP_TAGS = {'defs', 'marker', 'pattern', 'symbol', 'clipPath', 'mask', 'filter',
+                      'namedview', 'metadata', 'sodipodi:namedview'}
+
         def collect(elem, parent_T):
+            tag = strip_ns(elem.tag)
+            if tag in _SKIP_TAGS:
+                return  # skip entire subtree — these are definitions, not drawn paths
             t_str = elem.get('transform', '')
             T = compose(parent_T, parse_transform(t_str)) if t_str else parent_T
-            if strip_ns(elem.tag) == 'path':
+            if tag == 'path':
                 d = elem.get('d', '')
                 if d:
                     path_list.append((d, T))
