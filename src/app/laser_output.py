@@ -49,9 +49,10 @@ class HeliosOutput:
         self._lib = None
         self._dac_count = 0
         self._normalized_x: float | None = None  # 0.0-1.0, or None to blank
-        self._show_perimeter: bool = True
+        self._show_perimeter: bool = False
         self._logo_pts: list | None = None
         self._logo_mode: bool = False
+        self._rect_coords: tuple[int, int, int, int] | None = None
         self._lock = threading.Lock()
         self._running = False
         self._thread: threading.Thread | None = None
@@ -117,6 +118,14 @@ class HeliosOutput:
     def set_perimeter(self, enabled: bool) -> None:
         with self._lock:
             self._show_perimeter = enabled
+
+    def set_rect(self, lx0: int, ly0: int, lx1: int, ly1: int) -> None:
+        with self._lock:
+            self._rect_coords = (lx0, ly0, lx1, ly1)
+
+    def clear_rect(self) -> None:
+        with self._lock:
+            self._rect_coords = None
 
     def set_marker(self, normalized_x: float | None) -> None:
         """Update the projected line position.
@@ -187,6 +196,41 @@ class HeliosOutput:
         return frame, total
 
     @staticmethod
+    def _build_rect_frame(lx0: int, ly0: int, lx1: int, ly1: int) -> tuple[ctypes.Array, int]:
+        """Solid rectangle loop — all four sides fully lit, seamless frame wrap at (lx0, ly0).
+
+        Point density matches the full-screen perimeter (~34 laser units between points),
+        so smaller rectangles automatically get fewer points and higher frame rates.
+        The frame starts and ends at (lx0, ly0); the galvo never returns to origin.
+        """
+        density = _PERIM_PTS_PER_SIDE / 4095  # pts per laser unit
+        n_h = max(2, round(abs(lx1 - lx0) * density))
+        n_v = max(2, round(abs(ly1 - ly0) * density))
+
+        pts: list[tuple[int, int]] = []
+        # Side 1: (lx0, ly0) → (lx1, ly0)
+        for i in range(n_h):
+            pts.append((lx0 + round(i * (lx1 - lx0) / (n_h - 1)), ly0))
+        # Side 2: (lx1, ly0) → (lx1, ly1)
+        for i in range(n_v):
+            pts.append((lx1, ly0 + round(i * (ly1 - ly0) / (n_v - 1))))
+        # Side 3: (lx1, ly1) → (lx0, ly1)
+        for i in range(n_h):
+            pts.append((lx1 + round(i * (lx0 - lx1) / (n_h - 1)), ly1))
+        # Side 4: (lx0, ly1) → (lx0, ly0)  — ends at start, seamless loop
+        for i in range(n_v):
+            pts.append((lx0, ly1 + round(i * (ly0 - ly1) / (n_v - 1))))
+
+        total = len(pts)
+        frame = (HeliosPoint * total)()
+        for i, (x, y) in enumerate(pts):
+            frame[i].x = x
+            frame[i].y = y
+            frame[i].g = 255
+            frame[i].i = 255
+        return frame, total
+
+    @staticmethod
     def _build_combined_frame(helios_x: int) -> tuple[ctypes.Array, int]:
         """Dashed perimeter rectangle + vertical green line at helios_x.
 
@@ -196,10 +240,10 @@ class HeliosOutput:
              perimeter turns on, eliminating the lower-left corner dip.
           1. Perimeter — clockwise, dashed, ends at (0, 0)
           2. Blank transition (0,0) → (helios_x, 0)
-          3. Vertical line — fully lit, ends at (helios_x, 4095)
-          4. Blank dwell at (helios_x, 4095) — laser off but galvos stationary,
-             allows laser to fully extinguish before galvos start moving
-          5. Blank tail (helios_x, 4095) → (0, 0) so next frame starts dark
+          3. Vertical line — triangle wave (up y=0→4095, back down y=4095→0),
+             fully lit. Frame ends at y=0, matching frame start — no blanked
+             return stroke and no bright smear at frame wrap.
+          4. Blank tail (helios_x, 0) → (0, 0) so next frame starts dark
         """
         pts: list[tuple[int, int, bool]] = []
 
@@ -224,16 +268,15 @@ class HeliosOutput:
         for _ in range(20):
             pts.append((helios_x, 0, False))
 
-        # 3. Vertical line: (helios_x, 0) → (helios_x, 4095)
+        # 3. Triangle wave line: up y=0→4095, then back down y=4095→0.
+        #    Ends at y=0, so frame-to-frame wrap is seamless (zero galvo travel).
         m = _LINE_POINTS
         for i in range(m):
             pts.append((helios_x, int(i * 4095 / (m - 1)), True))
+        for i in range(m):
+            pts.append((helios_x, int((m - 1 - i) * 4095 / (m - 1)), True))
 
-        # 4. Blank dwell at top of line — laser off, galvos stationary
-        for _ in range(10):
-            pts.append((helios_x, 4095, False))
-
-        # 5. Blank tail: (helios_x, 4095) → (0, 0) so next frame starts dark
+        # 4. Blank tail: (helios_x, 0) → (0, 0) so next frame starts dark
         for _ in range(20):
             pts.append((0, 0, False))
 
@@ -430,10 +473,14 @@ class HeliosOutput:
                 show_perimeter = self._show_perimeter
                 logo_mode = self._logo_mode
                 logo_pts = self._logo_pts
+                rect_coords = self._rect_coords
 
             if logo_mode and logo_pts is not None:
                 frame, n = self._build_logo_frame(logo_pts)
                 pps = _LOGO_PPS
+            elif rect_coords is not None:
+                frame, n = self._build_rect_frame(*rect_coords)
+                pps = _LINE_PPS
             elif nx is not None:
                 helios_x = int(nx * 4095)
                 if show_perimeter:
