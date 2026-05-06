@@ -160,15 +160,31 @@ class HeliosOutput:
 
     @staticmethod
     def _build_line_frame(helios_x: int) -> tuple[ctypes.Array, int]:
-        """Vertical green line only."""
+        """Vertical green line — triangle scan (up then back down).
+
+        The frame starts and ends at y=0, so the galvo position at the end of
+        one frame is identical to the start of the next.  This eliminates the
+        full-scale blanked return stroke of the previous single-pass design,
+        where the galvo had to jump from y=4095 back to y=0 while the next
+        frame's laser-on points were already being output — producing a bright
+        smear and wasting half the available scan time.
+        """
         n = _LINE_POINTS
-        frame = (HeliosPoint * n)()
+        total = 2 * n  # up-stroke + down-stroke, y=0 endpoint shared via seamless loop
+        frame = (HeliosPoint * total)()
         for i in range(n):
+            y = int(i * 4095 / (n - 1))
             frame[i].x = helios_x
-            frame[i].y = int(i * 4095 / (n - 1))
+            frame[i].y = y
             frame[i].g = 255
             frame[i].i = 255
-        return frame, n
+        for i in range(n):
+            y = int((n - 1 - i) * 4095 / (n - 1))
+            frame[n + i].x = helios_x
+            frame[n + i].y = y
+            frame[n + i].g = 255
+            frame[n + i].i = 255
+        return frame, total
 
     @staticmethod
     def _build_combined_frame(helios_x: int) -> tuple[ctypes.Array, int]:
