@@ -20,7 +20,7 @@ from .laser_output import HeliosOutput
 
 _DEFAULT_LOGO = Path(__file__).parent.parent.parent / "Bigfoot2.svg"
 
-_VERSION = "1.2.0"
+_VERSION = "1.3.0"
 
 _IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.tif *.webp);;All Files (*)"
 
@@ -122,7 +122,9 @@ class MainWindow(QMainWindow):
         # --- Canvas ---
         self._canvas = ImageCanvas()
         self._canvas.marker_changed.connect(self._on_marker_changed)
+        self._canvas.line_first_point.connect(self._on_line_first_point)
         self._canvas.rect_changed.connect(self._on_rect_changed)
+        self._canvas.rect_first_point.connect(self._on_line_first_point)
 
         # --- Root layout ---
         root = QWidget()
@@ -190,7 +192,7 @@ class MainWindow(QMainWindow):
         if self._btn_mark_rect.isChecked():
             hint = "  |  Click first corner of rectangle…"
         elif self._btn_mark_line.isChecked():
-            hint = "  |  Click to place line marker"
+            hint = "  |  Click first point of line, then second point"
         else:
             hint = ""
         self._status.setText(
@@ -202,7 +204,7 @@ class MainWindow(QMainWindow):
             self._btn_mark_rect.setChecked(False)
         self._canvas.set_line_mode(enabled)
         if enabled:
-            self._status.setText("Click to place line marker")
+            self._status.setText("Click first point of line, then second point")
 
     def _on_perimeter_toggled(self, enabled: bool) -> None:
         self._canvas.set_perimeter(enabled)
@@ -241,18 +243,27 @@ class MainWindow(QMainWindow):
             f"Rectangle: ({x0:.0f}, {y0:.0f}) → ({x1:.0f}, {y1:.0f}) px"
         )
 
-    def _on_marker_changed(self, image_x: float | None):
-        if image_x is not None and self._image_width > 0:
-            self._laser.set_marker(image_x / self._image_width)
+    def _on_line_first_point(self, pt) -> None:
+        if pt is not None:
+            img_x, img_y = pt
+            lx = int(img_x / self._image_width * 4095)
+            ly = 4095 - int(img_y / self._image_height * 4095)
+            self._laser.set_first_point(lx, ly)
         else:
-            self._laser.set_marker(None)
+            self._laser.clear_first_point()
 
-        if not self._current_name:
-            return
-        w, h = self._canvas.image_size
-        base = f"{self._current_name}  ({w} × {h} px)  |  "
-        if image_x is None:
-            if self._btn_mark_line.isChecked():
-                self._status.setText(base + "Click to place line marker")
+    def _on_marker_changed(self, line_pts) -> None:
+        if line_pts is not None:
+            x0, y0, x1, y1 = line_pts
+            lx0 = int(x0 / self._image_width * 4095)
+            ly0 = 4095 - int(y0 / self._image_height * 4095)
+            lx1 = int(x1 / self._image_width * 4095)
+            ly1 = 4095 - int(y1 / self._image_height * 4095)
+            self._laser.set_line(lx0, ly0, lx1, ly1)
+            self._status.setText(
+                f"Line: ({x0:.0f}, {y0:.0f}) → ({x1:.0f}, {y1:.0f}) px"
+            )
         else:
-            self._status.setText(base + f"Marker: x = {image_x:.1f} px")
+            self._laser.clear_line()
+            if self._btn_mark_line.isChecked():
+                self._status.setText("Click first point of line, then second point")
