@@ -20,7 +20,7 @@ from .laser_output import HeliosOutput
 
 _DEFAULT_LOGO = Path(__file__).parent.parent.parent / "Bigfoot2.svg"
 
-_VERSION = "1.3.0"
+_VERSION = "1.3.1"
 
 _IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.tif *.webp);;All Files (*)"
 

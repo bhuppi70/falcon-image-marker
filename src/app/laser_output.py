@@ -13,10 +13,8 @@ from pathlib import Path
 # Libraries are stored in the project root (two levels above src/app/)
 _LIB_DIR = Path(__file__).parent.parent.parent
 
-# Dashed perimeter: points per side and dash on/off lengths (in points)
+# Perimeter: points per side
 _PERIM_PTS_PER_SIDE = 120
-_DASH_ON = 15
-_DASH_OFF = 10
 
 _LINE_PPS = 30_000
 _LOGO_PPS = 25_000
@@ -182,7 +180,8 @@ class HeliosOutput:
         """
         density = _PERIM_PTS_PER_SIDE / 4095
         n = max(2, round(math.hypot(lx1 - lx0, ly1 - ly0) * density))
-        total = 2 * n
+        _DWELL = 8  # blank points at turnaround so galvo decelerates before reversing
+        total = 2 * n + _DWELL
         frame = (HeliosPoint * total)()
         for i in range(n):
             t = i / (n - 1)
@@ -190,12 +189,15 @@ class HeliosOutput:
             frame[i].y = round(ly0 + t * (ly1 - ly0))
             frame[i].g = 255
             frame[i].i = 255
+        for i in range(_DWELL):
+            frame[n + i].x = lx1
+            frame[n + i].y = ly1
         for i in range(n):
             t = i / (n - 1)
-            frame[n + i].x = round(lx1 + t * (lx0 - lx1))
-            frame[n + i].y = round(ly1 + t * (ly0 - ly1))
-            frame[n + i].g = 255
-            frame[n + i].i = 255
+            frame[n + _DWELL + i].x = round(lx1 + t * (lx0 - lx1))
+            frame[n + _DWELL + i].y = round(ly1 + t * (ly0 - ly1))
+            frame[n + _DWELL + i].g = 255
+            frame[n + _DWELL + i].i = 255
         return frame, total
 
     @staticmethod
@@ -250,9 +252,8 @@ class HeliosOutput:
         for _ in range(20):
             pts.append((0, 0, False))
 
-        # 1. Dashed perimeter — clockwise from bottom-left, ends at (0, 0)
+        # 1. Solid perimeter — clockwise from bottom-left, ends at (0, 0)
         n = _PERIM_PTS_PER_SIDE
-        cycle = _DASH_ON + _DASH_OFF
         sides = [
             [(int(i * 4095 / (n - 1)), 0)         for i in range(n)],  # bottom L→R
             [(4095, int(i * 4095 / (n - 1)))       for i in range(n)],  # right  B→T
@@ -260,11 +261,17 @@ class HeliosOutput:
             [(0, int((n-1-i) * 4095 / (n-1)))     for i in range(n)],  # left   T→B
         ]
         for side in sides:
-            for j, (x, y) in enumerate(side):
-                pts.append((x, y, (j % cycle) < _DASH_ON))
+            for x, y in side:
+                pts.append((x, y, True))
 
-        # 2. Blank transition: (0, 0) → line start
+        # 2a. Blank dwell at (0, 0) — galvo decelerates from the left-side perimeter scan
+        #     (which ends at full downward speed) before reversing to jump to A.
         for _ in range(20):
+            pts.append((0, 0, False))
+        # 2b. Blank settle at A — for lines near the top of the field the jump from
+        #     (0,0) to A can exceed 3000 laser units; 60 pts (2 ms) gives enough
+        #     settle time before the laser turns on for the forward scan.
+        for _ in range(60):
             pts.append((lx0, ly0, False))
 
         # 3. Triangle scan: A→B then B→A, all lit, ends at (lx0, ly0)
@@ -273,9 +280,15 @@ class HeliosOutput:
         for i in range(m):
             t = i / (m - 1)
             pts.append((round(lx0 + t * (lx1 - lx0)), round(ly0 + t * (ly1 - ly0)), True))
+        # Blank dwell at B: galvo decelerates before reversing (prevents tail at lower end).
+        for _ in range(8):
+            pts.append((lx1, ly1, False))
         for i in range(m):
             t = i / (m - 1)
             pts.append((round(lx1 + t * (lx0 - lx1)), round(ly1 + t * (ly0 - ly1)), True))
+        # Blank dwell at A: galvo decelerates before jumping to origin (prevents tail at upper end).
+        for _ in range(8):
+            pts.append((lx0, ly0, False))
 
         # 4. Blank tail: line start → (0, 0)
         for _ in range(20):

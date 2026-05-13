@@ -112,9 +112,7 @@ class ImageCanvas(QWidget):
             painter.drawLine(wx0, wy0, wx1, wy1)
 
             if self._show_perimeter:
-                border_pen = QPen(QColor(0, 255, 0), 2, Qt.PenStyle.DashLine)
-                border_pen.setDashPattern([8, 5])
-                painter.setPen(border_pen)
+                painter.setPen(QPen(QColor(0, 255, 0), 2, Qt.PenStyle.SolidLine))
                 painter.drawRect(img_rect)
 
         if self._line_p1 is not None:
