@@ -18,9 +18,10 @@ from PyQt6.QtWidgets import (
 from .image_canvas import ImageCanvas
 from .laser_output import HeliosOutput
 
-_DEFAULT_LOGO = Path(__file__).parent.parent.parent / "Bigfoot2.svg"
+_DEFAULT_BF_LOGO = Path(__file__).parent.parent.parent / "Bigfoot2.svg"
+_DEFAULT_AE_LOGO = Path(__file__).parent.parent.parent / "aedyn_logo_BH.svg"
 
-_VERSION = "1.3.1"
+_VERSION = "1.4.0"
 
 _IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.tif *.webp);;All Files (*)"
 
@@ -86,17 +87,29 @@ class MainWindow(QMainWindow):
         self._btn_perimeter.setChecked(False)
         self._btn_perimeter.toggled.connect(self._on_perimeter_toggled)
 
-        self._btn_logo = QPushButton("Logo")
-        self._btn_logo.setStyleSheet(_BUTTON_STYLE)
-        self._btn_logo.setCheckable(True)
-        self._btn_logo.setChecked(False)
-        self._btn_logo.toggled.connect(self._on_logo_toggled)
+        self._btn_ae_logo = QPushButton("AE Logo")
+        self._btn_ae_logo.setStyleSheet(_BUTTON_STYLE)
+        self._btn_ae_logo.setCheckable(True)
+        self._btn_ae_logo.setChecked(False)
+        self._btn_ae_logo.toggled.connect(self._on_ae_logo_toggled)
+
+        self._btn_bf_logo = QPushButton("BF Logo")
+        self._btn_bf_logo.setStyleSheet(_BUTTON_STYLE)
+        self._btn_bf_logo.setCheckable(True)
+        self._btn_bf_logo.setChecked(False)
+        self._btn_bf_logo.toggled.connect(self._on_bf_logo_toggled)
 
         self._btn_mark_rect = QPushButton("Mark Rectangle")
         self._btn_mark_rect.setStyleSheet(_BUTTON_STYLE)
         self._btn_mark_rect.setCheckable(True)
         self._btn_mark_rect.setChecked(False)
         self._btn_mark_rect.toggled.connect(self._on_mark_rect_toggled)
+
+        self._btn_neutral_beam = QPushButton("Neutral Beam")
+        self._btn_neutral_beam.setStyleSheet(_BUTTON_STYLE)
+        self._btn_neutral_beam.setCheckable(True)
+        self._btn_neutral_beam.setChecked(False)
+        self._btn_neutral_beam.toggled.connect(self._on_neutral_beam_toggled)
 
         if laser_ok:
             n = self._laser.device_count
@@ -116,8 +129,10 @@ class MainWindow(QMainWindow):
         btn_bar.addWidget(self._btn_mark_line)
         btn_bar.addWidget(self._btn_mark_rect)
         btn_bar.addWidget(self._btn_perimeter)
-        btn_bar.addWidget(self._btn_logo)
+        btn_bar.addWidget(self._btn_ae_logo)
+        btn_bar.addWidget(self._btn_bf_logo)
         btn_bar.addStretch()
+        btn_bar.addWidget(self._btn_neutral_beam)
 
         # --- Canvas ---
         self._canvas = ImageCanvas()
@@ -142,9 +157,11 @@ class MainWindow(QMainWindow):
 
         self._build_menu()
 
-        # Auto-load default logo so the laser projects immediately on startup
-        if laser_ok and _DEFAULT_LOGO.exists() and self._laser.load_logo(str(_DEFAULT_LOGO)):
-            self._btn_logo.setChecked(True)
+        # Pre-load both logos so buttons work without a file dialog
+        if laser_ok and _DEFAULT_AE_LOGO.exists():
+            self._laser.load_ae_logo(str(_DEFAULT_AE_LOGO))
+        if laser_ok and _DEFAULT_BF_LOGO.exists() and self._laser.load_bf_logo(str(_DEFAULT_BF_LOGO)):
+            self._btn_bf_logo.setChecked(True)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._laser.close()
@@ -183,8 +200,10 @@ class MainWindow(QMainWindow):
             self._status.setText(f"Failed to load: {path}")
             return
 
-        if self._btn_logo.isChecked():
-            self._btn_logo.setChecked(False)
+        if self._btn_ae_logo.isChecked():
+            self._btn_ae_logo.setChecked(False)
+        if self._btn_bf_logo.isChecked():
+            self._btn_bf_logo.setChecked(False)
 
         self._current_name = Path(path).name
         self._image_width, self._image_height = self._canvas.image_size
@@ -200,32 +219,77 @@ class MainWindow(QMainWindow):
         )
 
     def _on_mark_line_toggled(self, enabled: bool) -> None:
-        if enabled and self._btn_mark_rect.isChecked():
-            self._btn_mark_rect.setChecked(False)
+        if enabled:
+            if self._btn_mark_rect.isChecked():
+                self._btn_mark_rect.setChecked(False)
+            if self._btn_neutral_beam.isChecked():
+                self._btn_neutral_beam.setChecked(False)
         self._canvas.set_line_mode(enabled)
         if enabled:
             self._status.setText("Click first point of line, then second point")
 
     def _on_perimeter_toggled(self, enabled: bool) -> None:
+        if enabled and self._btn_neutral_beam.isChecked():
+            self._btn_neutral_beam.setChecked(False)
         self._canvas.set_perimeter(enabled)
         self._laser.set_perimeter(enabled)
 
-    def _on_logo_toggled(self, enabled: bool) -> None:
-        if enabled and not self._laser.logo_loaded:
-            path, _ = QFileDialog.getOpenFileName(
-                self, "Open Logo SVG", str(Path.home()), "SVG Files (*.svg);;All Files (*)"
-            )
-            if not path or not self._laser.load_logo(path):
-                self._btn_logo.setChecked(False)
-                return
-        self._laser.set_logo_mode(enabled)
+    def _on_ae_logo_toggled(self, enabled: bool) -> None:
+        if enabled:
+            if self._btn_neutral_beam.isChecked():
+                self._btn_neutral_beam.setChecked(False)
+            if self._btn_bf_logo.isChecked():
+                self._btn_bf_logo.setChecked(False)
+            if not self._laser.ae_logo_loaded:
+                path, _ = QFileDialog.getOpenFileName(
+                    self, "Open AE Logo SVG", str(Path.home()), "SVG Files (*.svg);;All Files (*)"
+                )
+                if not path or not self._laser.load_ae_logo(path):
+                    self._btn_ae_logo.setChecked(False)
+                    return
+        self._laser.set_ae_logo_mode(enabled)
+
+    def _on_bf_logo_toggled(self, enabled: bool) -> None:
+        if enabled:
+            if self._btn_neutral_beam.isChecked():
+                self._btn_neutral_beam.setChecked(False)
+            if self._btn_ae_logo.isChecked():
+                self._btn_ae_logo.setChecked(False)
+            if not self._laser.bf_logo_loaded:
+                path, _ = QFileDialog.getOpenFileName(
+                    self, "Open BF Logo SVG", str(Path.home()), "SVG Files (*.svg);;All Files (*)"
+                )
+                if not path or not self._laser.load_bf_logo(path):
+                    self._btn_bf_logo.setChecked(False)
+                    return
+        self._laser.set_bf_logo_mode(enabled)
 
     def _on_mark_rect_toggled(self, enabled: bool) -> None:
-        if enabled and self._btn_mark_line.isChecked():
-            self._btn_mark_line.setChecked(False)
+        if enabled:
+            if self._btn_mark_line.isChecked():
+                self._btn_mark_line.setChecked(False)
+            if self._btn_neutral_beam.isChecked():
+                self._btn_neutral_beam.setChecked(False)
         self._canvas.set_rect_mode(enabled)
         if enabled:
             self._status.setText("Click first corner of rectangle, then second corner")
+
+    def _on_neutral_beam_toggled(self, enabled: bool) -> None:
+        if enabled:
+            if self._btn_mark_line.isChecked():
+                self._btn_mark_line.setChecked(False)
+            if self._btn_mark_rect.isChecked():
+                self._btn_mark_rect.setChecked(False)
+            if self._btn_perimeter.isChecked():
+                self._btn_perimeter.setChecked(False)
+            if self._btn_ae_logo.isChecked():
+                self._btn_ae_logo.setChecked(False)
+            if self._btn_bf_logo.isChecked():
+                self._btn_bf_logo.setChecked(False)
+            self._status.setText("Neutral Beam: laser at center position")
+        else:
+            self._status.setText(self._current_name or "Open an image to get started")
+        self._laser.set_neutral_beam(enabled)
 
     def _on_rect_changed(self, rect) -> None:
         if rect is None:

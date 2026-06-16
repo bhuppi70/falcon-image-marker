@@ -47,9 +47,12 @@ class HeliosOutput:
         self._line_pts: tuple[int, int, int, int] | None = None  # laser coords, or None to blank
         self._first_pt: tuple[int, int] | None = None            # single point while awaiting p2
         self._show_perimeter: bool = False
-        self._logo_pts: list | None = None
-        self._logo_mode: bool = False
+        self._bf_logo_pts: list | None = None
+        self._bf_logo_mode: bool = False
+        self._ae_logo_pts: list | None = None
+        self._ae_logo_mode: bool = False
         self._rect_coords: tuple[int, int, int, int] | None = None
+        self._neutral_beam: bool = False
         self._lock = threading.Lock()
         self._running = False
         self._thread: threading.Thread | None = None
@@ -93,11 +96,15 @@ class HeliosOutput:
         self._dac_count = 0
 
     @property
-    def logo_loaded(self) -> bool:
-        return self._logo_pts is not None
+    def bf_logo_loaded(self) -> bool:
+        return self._bf_logo_pts is not None
 
-    def load_logo(self, path: str) -> bool:
-        """Parse an SVG file and pre-compute laser scan points. Returns True on success."""
+    @property
+    def ae_logo_loaded(self) -> bool:
+        return self._ae_logo_pts is not None
+
+    def load_bf_logo(self, path: str) -> bool:
+        """Parse an SVG and pre-compute Bigfoot logo scan points. Returns True on success."""
         try:
             pts = self._svg_to_scan_points(path)
         except Exception:
@@ -105,12 +112,28 @@ class HeliosOutput:
         if not pts:
             return False
         with self._lock:
-            self._logo_pts = pts
+            self._bf_logo_pts = pts
         return True
 
-    def set_logo_mode(self, enabled: bool) -> None:
+    def load_ae_logo(self, path: str) -> bool:
+        """Parse an SVG and pre-compute AE Dynamics logo scan points. Returns True on success."""
+        try:
+            pts = self._svg_to_scan_points(path)
+        except Exception:
+            return False
+        if not pts:
+            return False
         with self._lock:
-            self._logo_mode = enabled
+            self._ae_logo_pts = pts
+        return True
+
+    def set_bf_logo_mode(self, enabled: bool) -> None:
+        with self._lock:
+            self._bf_logo_mode = enabled
+
+    def set_ae_logo_mode(self, enabled: bool) -> None:
+        with self._lock:
+            self._ae_logo_mode = enabled
 
     def set_perimeter(self, enabled: bool) -> None:
         with self._lock:
@@ -139,6 +162,10 @@ class HeliosOutput:
     def clear_first_point(self) -> None:
         with self._lock:
             self._first_pt = None
+
+    def set_neutral_beam(self, enabled: bool) -> None:
+        with self._lock:
+            self._neutral_beam = enabled
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -304,6 +331,95 @@ class HeliosOutput:
         return frame, total
 
     @staticmethod
+    def _build_perimeter_frame() -> tuple[ctypes.Array, int]:
+        """Full-screen perimeter loop — solid, clockwise, seamless frame wrap at (0, 0)."""
+        n = _PERIM_PTS_PER_SIDE
+        sides = [
+            [(int(i * 4095 / (n - 1)), 0)         for i in range(n)],  # bottom L→R
+            [(4095, int(i * 4095 / (n - 1)))       for i in range(n)],  # right  B→T
+            [(int((n-1-i) * 4095 / (n-1)), 4095)  for i in range(n)],  # top    R→L
+            [(0, int((n-1-i) * 4095 / (n-1)))     for i in range(n)],  # left   T→B
+        ]
+        total = n * 4
+        frame = (HeliosPoint * total)()
+        idx = 0
+        for side in sides:
+            for x, y in side:
+                frame[idx].x = x
+                frame[idx].y = y
+                frame[idx].g = 255
+                frame[idx].i = 255
+                idx += 1
+        return frame, total
+
+    @staticmethod
+    def _build_rect_combined_frame(lx0: int, ly0: int, lx1: int, ly1: int) -> tuple[ctypes.Array, int]:
+        """Full-screen perimeter + rectangle outline.
+
+        Frame structure (transitions blanked):
+          0. Blank head-dwell at (0, 0)
+          1. Perimeter — clockwise, solid, ends at (0, 0)
+          2. Blank transition (0, 0) → (lx0, ly0)
+          3. Rectangle loop — all four sides lit, seamless, ends at (lx0, ly0)
+          4. Blank tail (lx0, ly0) → (0, 0) — seamless into next frame's head dwell
+        """
+        pts: list[tuple[int, int, bool]] = []
+
+        # 0. Blank head-dwell at (0, 0)
+        for _ in range(20):
+            pts.append((0, 0, False))
+
+        # 1. Full-screen perimeter — clockwise from bottom-left
+        n = _PERIM_PTS_PER_SIDE
+        sides = [
+            [(int(i * 4095 / (n - 1)), 0)         for i in range(n)],  # bottom L→R
+            [(4095, int(i * 4095 / (n - 1)))       for i in range(n)],  # right  B→T
+            [(int((n-1-i) * 4095 / (n-1)), 4095)  for i in range(n)],  # top    R→L
+            [(0, int((n-1-i) * 4095 / (n-1)))     for i in range(n)],  # left   T→B
+        ]
+        for side in sides:
+            for x, y in side:
+                pts.append((x, y, True))
+
+        # 2. Blank transition: decelerate at (0,0) then slew to rectangle start
+        for _ in range(20):
+            pts.append((0, 0, False))
+        for _ in range(60):
+            pts.append((lx0, ly0, False))
+
+        # 3. Rectangle loop — all lit, ends back at (lx0, ly0)
+        density = _PERIM_PTS_PER_SIDE / 4095
+        n_h = max(2, round(abs(lx1 - lx0) * density))
+        n_v = max(2, round(abs(ly1 - ly0) * density))
+        for i in range(n_h):
+            pts.append((lx0 + round(i * (lx1 - lx0) / (n_h - 1)), ly0, True))
+        for i in range(n_v):
+            pts.append((lx1, ly0 + round(i * (ly1 - ly0) / (n_v - 1)), True))
+        for i in range(n_h):
+            pts.append((lx1 + round(i * (lx0 - lx1) / (n_h - 1)), ly1, True))
+        for i in range(n_v):
+            pts.append((lx0, ly1 + round(i * (ly0 - ly1) / (n_v - 1)), True))
+
+        # Lit dwell: galvo reaches the corner while laser is on; blank dwell: decelerate before jump
+        for _ in range(4):
+            pts.append((lx0, ly0, True))
+        for _ in range(8):
+            pts.append((lx0, ly0, False))
+
+        # 4. Blank tail back to (0, 0)
+        for _ in range(20):
+            pts.append((0, 0, False))
+
+        total = len(pts)
+        frame = (HeliosPoint * total)()
+        for i, (x, y, lit) in enumerate(pts):
+            frame[i].x = x
+            frame[i].y = y
+            frame[i].g = 255 if lit else 0
+            frame[i].i = 255 if lit else 0
+        return frame, total
+
+    @staticmethod
     def _svg_to_scan_points(svg_path: str) -> list:
         """Parse an SVG file and return (lx, ly, lit) tuples in 0-4095 laser space."""
         import math
@@ -381,7 +497,7 @@ class HeliosOutput:
         # scale relative to viewBox so both small (Bigfoot, 211 units) and large (800 units)
         # SVGs sample at a similar physical density (~20 laser units between points).
         STEP = max(0.5, vb_w * 20 / 4095)
-        BLANK_DWELL = 8   # dark-dwell points when galvos must jump to a new position
+        BLANK_DWELL = 12  # dark-dwell points when galvos must jump to a new position
         # Two endpoints are "continuous" when they map to the same laser pixel (≤ 10 units).
         # This detects connected strokes split across separate <path> elements (e.g. Bigfoot)
         # without accidentally bridging genuinely separate strokes.
@@ -435,6 +551,18 @@ class HeliosOutput:
                     or abs(lx0 - last_lx) + abs(ly0 - last_ly) > CONTINUITY_THRESH
                 )
                 if is_gap:
+                    if last_lx is not None:
+                        # Lit dwell at the previous endpoint: parks the galvo at the
+                        # true endpoint while the laser is still on, so the stroke
+                        # visually reaches its full length despite servo lag.
+                        for _ in range(4):
+                            result.append((last_lx, last_ly, True))
+                        # Brief blank dwell: laser off so the galvo can decelerate
+                        # before jumping, suppressing overshoot tails.
+                        for _ in range(2):
+                            result.append((last_lx, last_ly, False))
+                    # Start-of-stroke dwell: blank at the new position while the galvo
+                    # travels there and settles before the laser turns on.
                     for _ in range(BLANK_DWELL):
                         result.append((lx0, ly0, False))
 
@@ -501,24 +629,39 @@ class HeliosOutput:
     def _output_loop(self) -> None:
         while self._running:
             with self._lock:
+                neutral_beam = self._neutral_beam
                 line_pts = self._line_pts
                 first_pt = self._first_pt
                 show_perimeter = self._show_perimeter
-                logo_mode = self._logo_mode
-                logo_pts = self._logo_pts
+                bf_logo_mode = self._bf_logo_mode
+                bf_logo_pts = self._bf_logo_pts
+                ae_logo_mode = self._ae_logo_mode
+                ae_logo_pts = self._ae_logo_pts
                 rect_coords = self._rect_coords
 
-            if logo_mode and logo_pts is not None:
-                frame, n = self._build_logo_frame(logo_pts)
+            if neutral_beam:
+                frame, n = self._build_point_frame(2048, 2048)
+                pps = _LINE_PPS
+            elif ae_logo_mode and ae_logo_pts is not None:
+                frame, n = self._build_logo_frame(ae_logo_pts)
+                pps = _LOGO_PPS
+            elif bf_logo_mode and bf_logo_pts is not None:
+                frame, n = self._build_logo_frame(bf_logo_pts)
                 pps = _LOGO_PPS
             elif rect_coords is not None:
-                frame, n = self._build_rect_frame(*rect_coords)
+                if show_perimeter:
+                    frame, n = self._build_rect_combined_frame(*rect_coords)
+                else:
+                    frame, n = self._build_rect_frame(*rect_coords)
                 pps = _LINE_PPS
             elif line_pts is not None:
                 if show_perimeter:
                     frame, n = self._build_combined_frame(*line_pts)
                 else:
                     frame, n = self._build_line_frame(*line_pts)
+                pps = _LINE_PPS
+            elif show_perimeter:
+                frame, n = self._build_perimeter_frame()
                 pps = _LINE_PPS
             elif first_pt is not None:
                 frame, n = self._build_point_frame(*first_pt)
