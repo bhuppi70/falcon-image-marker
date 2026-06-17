@@ -19,6 +19,8 @@ _PERIM_PTS_PER_SIDE = 120
 _LINE_PPS = 30_000
 _LOGO_PPS = 25_000
 
+_RECT_CORNER_DWELL = 8   # lit points at each corner so the galvo decelerates before turning
+
 # WriteFrame flag: play once per call (don't loop internally)
 _FLAG_SINGLE_MODE = 1 << 1
 
@@ -229,29 +231,38 @@ class HeliosOutput:
 
     @staticmethod
     def _build_rect_frame(lx0: int, ly0: int, lx1: int, ly1: int) -> tuple[ctypes.Array, int]:
-        """Solid rectangle loop — all four sides fully lit, seamless frame wrap at (lx0, ly0).
+        """Solid rectangle loop — all four sides fully lit, seamless frame wrap.
 
-        Point density matches the full-screen perimeter (~34 laser units between points),
-        so smaller rectangles automatically get fewer points and higher frame rates.
-        The frame starts and ends at (lx0, ly0); the galvo never returns to origin.
+        Each side skips its start corner (covered by the previous corner's dwell) and
+        ends with _RECT_CORNER_DWELL lit points so the galvo decelerates before turning.
+        All four corners get identical dwell; the loop is fully symmetric.
         """
-        density = _PERIM_PTS_PER_SIDE / 4095  # pts per laser unit
+        density = _PERIM_PTS_PER_SIDE / 4095
         n_h = max(2, round(abs(lx1 - lx0) * density))
         n_v = max(2, round(abs(ly1 - ly0) * density))
+        _CD = _RECT_CORNER_DWELL
 
         pts: list[tuple[int, int]] = []
-        # Side 1: (lx0, ly0) → (lx1, ly0)
-        for i in range(n_h):
+        # Side 1: interior only (start corner covered by end-of-frame dwell on loop)
+        for i in range(1, n_h):
             pts.append((lx0 + round(i * (lx1 - lx0) / (n_h - 1)), ly0))
-        # Side 2: (lx1, ly0) → (lx1, ly1)
-        for i in range(n_v):
+        for _ in range(_CD):
+            pts.append((lx1, ly0))
+        # Side 2
+        for i in range(1, n_v):
             pts.append((lx1, ly0 + round(i * (ly1 - ly0) / (n_v - 1))))
-        # Side 3: (lx1, ly1) → (lx0, ly1)
-        for i in range(n_h):
+        for _ in range(_CD):
+            pts.append((lx1, ly1))
+        # Side 3
+        for i in range(1, n_h):
             pts.append((lx1 + round(i * (lx0 - lx1) / (n_h - 1)), ly1))
-        # Side 4: (lx0, ly1) → (lx0, ly0)  — ends at start, seamless loop
-        for i in range(n_v):
+        for _ in range(_CD):
+            pts.append((lx0, ly1))
+        # Side 4 — dwell lands on (lx0, ly0), seamlessly entering the next frame's side 1
+        for i in range(1, n_v):
             pts.append((lx0, ly1 + round(i * (ly0 - ly1) / (n_v - 1))))
+        for _ in range(_CD):
+            pts.append((lx0, ly0))
 
         total = len(pts)
         frame = (HeliosPoint * total)()
@@ -387,22 +398,32 @@ class HeliosOutput:
         for _ in range(60):
             pts.append((lx0, ly0, False))
 
-        # 3. Rectangle loop — all lit, ends back at (lx0, ly0)
+        # 3. Rectangle loop with corner dwells — all lit
         density = _PERIM_PTS_PER_SIDE / 4095
         n_h = max(2, round(abs(lx1 - lx0) * density))
         n_v = max(2, round(abs(ly1 - ly0) * density))
+        _CD = _RECT_CORNER_DWELL
+
+        # Side 1: full range (galvo just settled at lx0,ly0 from blank transition)
         for i in range(n_h):
             pts.append((lx0 + round(i * (lx1 - lx0) / (n_h - 1)), ly0, True))
-        for i in range(n_v):
+        for _ in range(_CD - 1):
+            pts.append((lx1, ly0, True))
+        # Sides 2-4: skip i=0 (start corner already emitted by previous dwell)
+        for i in range(1, n_v):
             pts.append((lx1, ly0 + round(i * (ly1 - ly0) / (n_v - 1)), True))
-        for i in range(n_h):
+        for _ in range(_CD - 1):
+            pts.append((lx1, ly1, True))
+        for i in range(1, n_h):
             pts.append((lx1 + round(i * (lx0 - lx1) / (n_h - 1)), ly1, True))
-        for i in range(n_v):
+        for _ in range(_CD - 1):
+            pts.append((lx0, ly1, True))
+        for i in range(1, n_v):
             pts.append((lx0, ly1 + round(i * (ly0 - ly1) / (n_v - 1)), True))
-
-        # Lit dwell: galvo reaches the corner while laser is on; blank dwell: decelerate before jump
-        for _ in range(4):
+        for _ in range(_CD - 1):
             pts.append((lx0, ly0, True))
+
+        # Blank dwell: galvo decelerates at (lx0, ly0) before jumping to (0, 0)
         for _ in range(8):
             pts.append((lx0, ly0, False))
 

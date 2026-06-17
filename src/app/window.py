@@ -19,7 +19,7 @@ from .image_canvas import ImageCanvas
 from .laser_output import HeliosOutput
 
 _DEFAULT_BF_LOGO = Path(__file__).parent.parent.parent / "Bigfoot2.svg"
-_DEFAULT_AE_LOGO = Path(__file__).parent.parent.parent / "aedyn_logo_BH.svg"
+_DEFAULT_AE_LOGO = Path(__file__).parent.parent.parent / "death_star_2.svg"
 
 _VERSION = "1.4.0"
 
