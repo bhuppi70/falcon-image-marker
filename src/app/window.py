@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from PyQt6.QtGui import QAction, QCloseEvent
@@ -18,10 +19,12 @@ from PyQt6.QtWidgets import (
 from .image_canvas import ImageCanvas
 from .laser_output import HeliosOutput
 
-_DEFAULT_BF_LOGO = Path(__file__).parent.parent.parent / "Bigfoot2.svg"
-_DEFAULT_AE_LOGO = Path(__file__).parent.parent.parent / "death_star_2.svg"
+_APP_ROOT = (Path(sys._MEIPASS) if getattr(sys, 'frozen', False)
+             else Path(__file__).parent.parent.parent)
+_DEFAULT_BF_LOGO = _APP_ROOT / "Bigfoot2.svg"
+_DEFAULT_AE_LOGO = _APP_ROOT / "death_star_2.svg"
 
-_VERSION = "1.4.0"
+_VERSION = "1.4.2"
 
 _IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.tif *.webp);;All Files (*)"
 
