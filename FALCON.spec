@@ -60,7 +60,7 @@ app = BUNDLE(
     info_plist={
         'NSHighResolutionCapable': True,
         'NSPrincipalClass': 'NSApplication',
-        'CFBundleShortVersionString': '1.4.2',
+        'CFBundleShortVersionString': '1.4.3',
         'CFBundleName': 'FALCON',
     },
 )

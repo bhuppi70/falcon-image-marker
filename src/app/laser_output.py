@@ -180,6 +180,77 @@ class HeliosOutput:
     def ae_logo_loaded(self) -> bool:
         return self._ae_logo_pts is not None
 
+    @property
+    def ae_logo_pts(self) -> list | None:
+        with self._lock:
+            return list(self._ae_logo_pts) if self._ae_logo_pts else None
+
+    @property
+    def bf_logo_pts(self) -> list | None:
+        with self._lock:
+            return list(self._bf_logo_pts) if self._bf_logo_pts else None
+
+    @staticmethod
+    def export_scan_diagram(pts: list, out_path: str) -> None:
+        """Render a scan-path diagram to a PNG file.
+
+        Green lines = laser ON, grey lines = laser OFF (blank slew).
+        A yellow circle marks the start position; red marks the end.
+        """
+        from PIL import Image, ImageDraw
+
+        W, H = 900, 900
+        PAD = 40
+        IMG_SZ = W - 2 * PAD
+
+        img = Image.new('RGB', (W, H), (18, 18, 18))
+        draw = ImageDraw.Draw(img)
+
+        def to_px(lx, ly):
+            x = PAD + int(lx / 4095 * IMG_SZ)
+            y = PAD + int((4095 - ly) / 4095 * IMG_SZ)
+            return x, y
+
+        for v in range(0, 4096, 1024):
+            x = PAD + int(v / 4095 * IMG_SZ)
+            y = PAD + int(v / 4095 * IMG_SZ)
+            draw.line([(x, PAD), (x, H - PAD)], fill=(40, 40, 40), width=1)
+            draw.line([(PAD, y), (W - PAD, y)], fill=(40, 40, 40), width=1)
+
+        COLOR_ON  = (0, 220, 60)
+        COLOR_OFF = (80, 80, 80)
+
+        prev_px = None
+        for lx, ly, lit in pts:
+            px = to_px(lx, ly)
+            if prev_px is not None:
+                draw.line([prev_px, px], fill=COLOR_ON if lit else COLOR_OFF,
+                          width=2 if lit else 1)
+            if lit:
+                draw.ellipse([px[0]-1, px[1]-1, px[0]+1, px[1]+1], fill=COLOR_ON)
+            prev_px = px
+
+        if pts:
+            spx = to_px(pts[0][0], pts[0][1])
+            draw.ellipse([spx[0]-5, spx[1]-5, spx[0]+5, spx[1]+5],
+                         outline=(255, 200, 0), width=2)
+            epx = to_px(pts[-1][0], pts[-1][1])
+            draw.ellipse([epx[0]-5, epx[1]-5, epx[0]+5, epx[1]+5],
+                         outline=(255, 80, 80), width=2)
+
+        draw.rectangle([PAD, H-PAD+5, PAD+18, H-PAD+15], fill=COLOR_ON)
+        draw.text((PAD+22, H-PAD+3), "Laser ON", fill=(200, 200, 200))
+        draw.rectangle([PAD+120, H-PAD+5, PAD+138, H-PAD+15], fill=COLOR_OFF)
+        draw.text((PAD+142, H-PAD+3), "Laser OFF (slew)", fill=(200, 200, 200))
+        draw.ellipse([PAD+300, H-PAD+5, PAD+312, H-PAD+17],
+                     outline=(255, 200, 0), width=2)
+        draw.text((PAD+316, H-PAD+3), "Start", fill=(200, 200, 200))
+        draw.ellipse([PAD+380, H-PAD+5, PAD+392, H-PAD+17],
+                     outline=(255, 80, 80), width=2)
+        draw.text((PAD+396, H-PAD+3), "End", fill=(200, 200, 200))
+
+        img.save(out_path)
+
     def load_bf_logo(self, path: str) -> bool:
         """Parse an SVG and pre-compute Bigfoot logo scan points. Returns True on success."""
         try:
@@ -733,18 +804,23 @@ class HeliosOutput:
                     last_rendered = False  # degenerate segment has no lit output here
                     continue
 
+                jump_dist = (abs(lx0 - last_lx) + abs(ly0 - last_ly)) if last_lx is not None else 0
                 is_gap = (
                     last_lx is None
                     or (prev_end_raw is not None and abs(seg_start - prev_end_raw) > 1e-6)
-                    or abs(lx0 - last_lx) + abs(ly0 - last_ly) > CONTINUITY_THRESH
+                    or jump_dist > CONTINUITY_THRESH
                 )
                 if is_gap:
                     if last_lx is not None and last_rendered:
-                        for _ in range(4):
-                            result.append((last_lx, last_ly, True))
-                        for _ in range(2):
+                        # Blank dwell at the segment end — keeps the laser OFF while the
+                        # galvo decelerates, avoiding overshoot smear at the endpoint.
+                        for _ in range(6):
                             result.append((last_lx, last_ly, False))
-                    for _ in range(BLANK_DWELL):
+                    # Scale settle time with jump distance so the galvo is fully stopped
+                    # before the next segment starts.  A fixed 12-point dwell (0.4 ms) is
+                    # fine for short hops but not for jumps > ~600 DAC units.
+                    settle = max(BLANK_DWELL, min(50, jump_dist // 20))
+                    for _ in range(settle):
                         result.append((lx0, ly0, False))
 
                 n = max(2, int(seg_len * t_scale / STEP) + 1)

@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -24,7 +25,7 @@ _APP_ROOT = (Path(sys._MEIPASS) if getattr(sys, 'frozen', False)
 _DEFAULT_BF_LOGO = _APP_ROOT / "Bigfoot2.svg"
 _DEFAULT_AE_LOGO = _APP_ROOT / "death_star_2.svg"
 
-_VERSION = "1.4.2"
+_VERSION = "1.4.3"
 
 _IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.tif *.webp);;All Files (*)"
 
@@ -189,6 +190,16 @@ class MainWindow(QMainWindow):
         quit_act.triggered.connect(self.close)
         file_menu.addAction(quit_act)
 
+        diag_menu = self.menuBar().addMenu("&Diagnostics")
+
+        ae_diag_act = QAction("Export AE Logo Scan Diagram…", self)
+        ae_diag_act.triggered.connect(self._export_ae_diagram)
+        diag_menu.addAction(ae_diag_act)
+
+        bf_diag_act = QAction("Export BF Logo Scan Diagram…", self)
+        bf_diag_act.triggered.connect(self._export_bf_diagram)
+        diag_menu.addAction(bf_diag_act)
+
     # ------------------------------------------------------------------
     # Slots
     # ------------------------------------------------------------------
@@ -318,6 +329,31 @@ class MainWindow(QMainWindow):
             self._laser.set_first_point(lx, ly)
         else:
             self._laser.clear_first_point()
+
+    def _export_ae_diagram(self) -> None:
+        self._export_diagram(self._laser.ae_logo_pts, "AE Logo")
+
+    def _export_bf_diagram(self) -> None:
+        self._export_diagram(self._laser.bf_logo_pts, "BF Logo")
+
+    def _export_diagram(self, pts: list | None, label: str) -> None:
+        if not pts:
+            QMessageBox.warning(self, "No Data",
+                                f"{label} has not been loaded yet.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, f"Save {label} Scan Diagram",
+            str(Path.home() / f"{label.lower().replace(' ', '_')}_scan.png"),
+            "PNG Images (*.png)"
+        )
+        if not path:
+            return
+        try:
+            from .laser_output import HeliosOutput
+            HeliosOutput.export_scan_diagram(pts, path)
+            self._status.setText(f"Saved scan diagram: {Path(path).name}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Failed", str(e))
 
     def _on_marker_changed(self, line_pts) -> None:
         if line_pts is not None:
